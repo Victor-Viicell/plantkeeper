@@ -1,0 +1,71 @@
+/* Mobile-first base. Every rule here targets a phone viewport; pages lay out as
+   a single column and only widen up to --app-max-width, so a wider window (the
+   Tauri desktop window) still reads as a mobile app. */
+:root {
+  font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+  font-weight: 400;
+
+  color: #0f0f0f;
+  background-color: #e9eee9;
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+
+  /* The width every page column is capped at. */
+  --app-max-width: 28rem;
+
+  --app-backdrop: #e9eee9;
+  --app-backdrop-accent: #e3f6e6;
+  --app-surface: #f6f6f6;
+  --app-card: #ffffff;
+  --app-border: #e4e6e4;
+  --app-control-border: #d8dcd8;
+  --app-text-muted: #5c665e;
+  --app-accent: #34a853;
+  --app-callout: #b3261e;
+  --app-shadow: 0 18px 40px rgba(24, 46, 28, 0.1);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+}
+
+body {
+  /* The webview is the app; rubber-banding the page reads as a bug on touch. */
+  overscroll-behavior: none;
+}
+
+#root {
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color: #f6f6f6;
+    background-color: #1b1f1b;
+
+    --app-backdrop: #1b1f1b;
+    --app-backdrop-accent: #16281a;
+    --app-surface: #2f2f2f;
+    --app-card: #1c1f1c;
+    --app-border: #3b423b;
+    --app-control-border: #3b423b;
+    --app-text-muted: #a3ada5;
+    --app-callout: #f2b8b5;
+    --app-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+  }
+}

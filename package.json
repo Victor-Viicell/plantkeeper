@@ -1,0 +1,27 @@
+{
+  "name": "plantkeeper",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsrx-tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@mnlphlp/plugin-blec": "^0.17.0",
+    "@ripple-ts/vite-plugin": "^0.4.7",
+    "@supabase/supabase-js": "^2.117.2",
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-deep-link": "^2.6.1",
+    "@tauri-apps/plugin-opener": "^2",
+    "ripple": "^0.4.7"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2",
+    "@tsrx/typescript-plugin": "^0.6.0",
+    "typescript": "~6.0.3",
+    "vite": "^8.0.16"
+  }
+}
