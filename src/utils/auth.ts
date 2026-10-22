@@ -6,11 +6,12 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { getSupabase } from "./supabase";
 
 /**
- * Temporary switch: while `true` the app signs in locally with a fake session
- * instead of going through Google. Set it to `false` (with the Supabase env
- * vars filled in) to restore the real flow — nothing else has to change.
+ * Local-only escape hatch: while `true` the app signs in with a fake session
+ * and serves a local device stand-in, with no backend involved. It is `false`
+ * in the shipped app, so sign-in goes through Google and reads/writes go to
+ * Supabase. Flip it to `true` only for offline UI work.
  */
-const USE_MOCK_AUTH: boolean = true;
+const USE_MOCK_AUTH: boolean = false;
 
 /**
  * Tells the rest of the app which mode it is running in, so adapters that talk

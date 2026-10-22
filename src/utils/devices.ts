@@ -7,10 +7,10 @@
  *   1. the user types the code into the app;
  *   2. `claim_device()` binds that row to the signed-in account.
  *
- * While sign-in itself is mocked (see `auth.ts`) there is no Supabase session
- * for row-level security to key on, so the very same handshake runs against a
- * local stand-in that keeps the shapes the backend returns. Flipping
- * `USE_MOCK_AUTH` to false is all it takes to talk to the real project.
+ * With real sign-in (the default in `auth.ts`) this talks to the project
+ * described by the IoT project's `supabase/schema.sql`, keyed by the session's
+ * uid. Flipping `USE_MOCK_AUTH` to true switches the same handshake to a local
+ * stand-in that keeps the shapes the backend returns, for offline UI work.
  */
 import { isMockAuthEnabled } from "./auth";
 import { getSupabase } from "./supabase";

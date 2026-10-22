@@ -23,35 +23,42 @@ bun install
 bun run dev          # http://localhost:1420
 ```
 
-It runs on a **mocked sign-in** out of the box (`USE_MOCK_AUTH` in
-`src/utils/auth.ts`), so it needs no backend and no `.env` to be useful: sign-in
-accepts anything, and the device layer serves a local stand-in seeded with the
-claim code `PLANT-4K7Q`. Type that into the **+** sheet and you get a device with
-a moving history to click around.
+Sign-in is **real**: the app talks to the Supabase project named in `.env`, and
+the Google button starts the OAuth flow. For offline UI work, set
+`USE_MOCK_AUTH` to `true` in `src/utils/auth.ts` — sign-in then accepts anything
+and the device layer serves a local stand-in seeded with the claim code
+`PLANT-4K7Q`.
 
-Bluetooth provisioning and real Google sign-in need the native shell:
+Bluetooth provisioning needs the native shell. Google sign-in also works in the
+browser tab, but the shipping path is Android:
 
 ```bash
 bun run tauri android dev     # emulator or device
 ```
 
-Read [Backend setup](#backend-setup) and [Authentication](#authentication) before
-switching the mock off — both have dashboard steps that are easy to miss.
+Read [Backend setup](#backend-setup) and [Authentication](#authentication) for
+the dashboard steps behind the live flow — both have settings that are easy to
+miss.
 
 ## Backend setup
 
 The app and the firmware share **one** Supabase project —
 `zubizzqwjteajycnwesf` — named in `.env` (app) and in the IoT project's
-`config.py` (device). Both have to agree or a claimed vase will never show
-readings.
+`config.py` (host) with its key in `credentials.py` (device). Both have to agree
+or a claimed vase will never show readings.
 
 1. **Apply the schema.** Paste the IoT project's
    `supabase/schema.sql` into Dashboard → SQL Editor → New query → Run. It
    creates `devices`, `readings`, the three RPCs, the RLS policies and the
-   indexes, and seeds device `vase-01` with claim code `PLANT-4K7Q`. Re-running
-   it is safe, with one exception: it drops the retired `rain` column, so the
-   `rain` values already stored are lost. That column only ever held the rain
-   module's raw analog output, and nothing reads it any more.
+   indexes. Re-running it is safe, with one exception: it drops the retired
+   `rain` column, so the `rain` values already stored are lost. That column
+   only ever held the rain module's raw analog output, and nothing reads it any
+   more.
+
+   Then seed the vase. The device secret is not committed, so copy
+   `supabase/seed.example.sql` to `supabase/seed.local.sql`, fill in
+   `device_secret` and run that too. It creates device `vase-01` with claim code
+   `PLANT-4K7Q`, and re-running it is safe.
 
    Re-run it after pulling a change to that file. The app renames a vase with a
    direct `update` and releases one through the `release_device()` RPC; both need
@@ -62,19 +69,24 @@ readings.
    this together with the firmware**: the old 7-argument function is dropped and
    a 6-argument one takes its place, and a board still sending `p_rain` gets a
    `function not found` from PostgREST until it is re-flashed.
-2. **Keep the seed in step.** `device_uid`, `device_secret` and `claim_code`
-   in the seed must match `config.py`, or `ingest_reading` rejects every sample.
+2. **Keep the secret in step.** `device_uid` and `claim_code` live in
+   `config.py`; `DEVICE_SECRET` and `SUPABASE_KEY` live in the IoT project's
+   `credentials.py`, created from `credentials.example.py` (both files are
+   gitignored). The secret must match the one in `seed.local.sql`, or
+   `ingest_reading` rejects every sample.
 3. **Let the firmware in.** The device authenticates with the project's
    publishable key over PostgREST, so `anon` needs `EXECUTE` on
-   `ingest_reading()` — the schema grants exactly that and nothing else.
+   `ingest_reading()` and on the no-table `ping()` health probe. Those two
+   functions are the entire unauthenticated surface: `anon` has no table
+   grants, so it cannot read or write `devices`/`readings` directly.
 
 The schema is written to be exercised against a real Postgres rather than only
 applied. With Supabase's `auth` schema and roles shimmed, the full file runs and
 the ownership model can be checked end to end: that a second user cannot re-claim
 a vase, cannot see or rename it, and cannot reassign its owner; that `anon` can
-only reach `ingest_reading()`; and that releasing works solely through
-`release_device()`. Worth running before applying a change to that file — there
-is no committed harness for it yet.
+only reach `ingest_reading()` and `ping()`; and that releasing works solely
+through `release_device()`. Worth running before applying a change to that file
+— there is no committed harness for it yet.
 
 ## Authentication
 
@@ -82,13 +94,14 @@ The app boots through three screens: a splash, then the Google sign-in page
 (`src/pages/Login.tsrx`) when there is no session, then the main app
 (`src/pages/Home.tsrx`) once there is one.
 
-**Sign-in is currently mocked.** `src/utils/auth.ts` holds a `USE_MOCK_AUTH`
-flag; while it is `true` the Google button signs in locally with a fake user,
-persisted under the `plantkeeper.mock-session` localStorage key, and Supabase is
-never contacted — which also means the device layer serves a local stand-in
-instead of your real rows. Setting the flag to `false` switches the same four
-functions (`getSession`, `onAuthStateChange`, `signInWithGoogle`, `signOut`) and
-the device queries back to Supabase — no component changes needed.
+**Sign-in is real.** `src/utils/auth.ts` still holds the `USE_MOCK_AUTH` flag,
+but it is `false`: the Google button runs the PKCE flow and the device layer
+reads and writes Supabase. Setting it to `true` switches the same four functions
+(`getSession`, `onAuthStateChange`, `signInWithGoogle`, `signOut`) and the device
+queries to a local stand-in, persisted under the `plantkeeper.mock-session`
+localStorage key — useful for offline UI work, never for shipping. The device
+layer follows the same flag, because with no Supabase session there is nothing
+for RLS to key on.
 
 The real flow is PKCE (`src/utils/supabase.ts`) and has two halves, picked by
 `src/utils/auth.ts` when the button is pressed:
@@ -127,10 +140,9 @@ one more thing besides `getSession()`.
 
 Before switching sign-in back on:
 
-1. **In the Supabase dashboard**, enable the Google provider under
-   Authentication → Providers (paste your Google OAuth client ID and secret).
-   This project currently lists **email** only, so Google has to be added, and
-   add under Authentication → URL Configuration → Redirect URLs:
+1. **In the Supabase dashboard**, the Google provider is already enabled under
+   Authentication → Providers (with its OAuth client ID and secret). Confirm
+   that Authentication → URL Configuration → Redirect URLs lists:
    - `com.viicell.plantkeeper://login-callback` for the app
    - `http://localhost:1420` for a browser tab
 
@@ -214,15 +226,14 @@ the device with its newest readings from `public.readings`.
 - `renameDevice(id, name)` and `releaseDevice(id)` — the two writes the app
   makes directly to `devices` (see [The screens](#the-screens)).
 
-Every operation has a stand-in counterpart (`claimMockDevice`, `mockHistory`, …)
-so all of them work with sign-in mocked too.
+Every operation also has a local stand-in (`claimMockDevice`, `mockHistory`, …),
+used only when `USE_MOCK_AUTH` is flipped on for offline UI work.
 
-The same flag that fakes sign-in switches the device layer too: while
-`USE_MOCK_AUTH` is `true` in `src/utils/auth.ts` there is no Supabase session
-for RLS to key on, so the handshake runs against a local stand-in seeded with
-`PLANT-4K7Q` that keeps the shapes the backend returns. Set the flag to `false`
-(and sign in for real) to talk to the project described by the IoT project's
-`supabase/schema.sql`; no component changes are needed.
+With real sign-in the device layer talks to the project described by the IoT
+project's `supabase/schema.sql`. Flipping `USE_MOCK_AUTH` to `true` switches
+both sign-in and the device layer to a local stand-in seeded with `PLANT-4K7Q`
+that keeps the shapes the backend returns — there is no Supabase session for RLS
+to key on in that mode.
 
 ### Re-provisioning
 
@@ -232,6 +243,11 @@ boot and stays quiet over Bluetooth. Changing the Wi-Fi password does not need a
 wipe — if the stored network fails at boot, the board reopens Bluetooth for 60 s.
 Moving the vase to a different account does need a wipe, since the stored
 credentials stay valid.
+
+The LCD is the vase's pairing surface: it shows the claim code for a couple of
+seconds on every boot, and keeps it on screen whenever there is no network —
+never configured, freshly reset, or the stored network failed. The same code is
+printed to the serial monitor, so a board without an LCD is still usable.
 
 ## The screens
 
@@ -292,7 +308,7 @@ the app already has — nothing there talks to Supabase.
 The rules and the dismissals are per device and kept in `localStorage`
 (`plantkeeper.notification-settings` and `plantkeeper.notification-dismissals`),
 next to the device stand-in: they survive a reload, need no backend, and behave
-the same with the mocked sign-in and with Supabase. They are **not** synced to
+the same with real sign-in and with the offline stand-in. They are **not** synced to
 the account, so a fresh install starts from the defaults again — and releasing a
 vase forgets its rules along with it.
 
