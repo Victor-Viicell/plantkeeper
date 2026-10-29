@@ -162,7 +162,7 @@ export function Login() @{
       <section class="login-card">
         <span class="login-badge" aria-hidden="true">🌱</span>
         <h1 class="login-title">Plantkeeper</h1>
-        <p class="login-subtitle">Entre para acompanhar todas as plantas que você tem.</p>
+        <p class="login-subtitle">Acompanhe suas plantas.</p>
 
         <button
           class="login-button"

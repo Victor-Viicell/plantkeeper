@@ -5,8 +5,12 @@
  *
  *   - a **warning** comes from the newest reading of a vase: a value that
  *     crossed a limit the user set for that device;
- *   - a **routine** is a daily reminder at a fixed time ("verificar a planta às
- *     9h"), which falls due once a day whether or not the vase is reporting.
+ *   - a **routine** is a reminder every N days at a fixed time ("regar a
+ *     planta a cada 7 dias, às 9h"), which falls due even when the vase is not
+ *     reporting.
+ *
+ * Warnings and routines can be filled from a plant preset, so someone who does
+ * not know a species' limits still starts from sensible values.
  *
  * Both are worked out on the client from readings the app already has, so
  * nothing here talks to Supabase. Settings and dismissals are per device and
@@ -29,17 +33,21 @@ export type MetricWarning = {
   high: number | null;
 };
 
-/** A daily reminder at a fixed local time. */
-export type DailyRoutine = {
+/** A reminder every `everyDays` days at a fixed local time. */
+export type CareRoutine = {
   enabled: boolean;
+  /** Days between reminders; 1 means every day. */
+  everyDays: number;
   /** Local time of day, `HH:MM`. */
   time: string;
   label: string;
 };
 
 export type DeviceNotificationSettings = {
+  /** The plant preset this came from, or `null` after a manual edit. */
+  presetId: string | null;
   warnings: Record<ReadingMetricKey, MetricWarning>;
-  routine: DailyRoutine;
+  routine: CareRoutine;
 };
 
 export type AppNotification = {
@@ -52,6 +60,8 @@ export type AppNotification = {
   detail: string;
   /** ISO stamp: when the reading was sampled, or when the routine fell due. */
   at: string;
+  /** Routines only: how many days separate two reminders. */
+  everyDays?: number;
 };
 
 /** How long "Dispensar" keeps a warning quiet before it comes back. */
@@ -67,13 +77,130 @@ export const ROUTINE_LABEL_MAX = 60;
  */
 export function defaultSettings(): DeviceNotificationSettings {
   return {
+    presetId: null,
     warnings: {
       soil: { enabled: true, low: 35, high: null },
-      light: { enabled: true, low: 25, high: null },
+      // 200 lx is shade under a shelf: dark enough to matter for most plants.
+      light: { enabled: true, low: 200, high: null },
       temperature: { enabled: true, low: null, high: 32 },
       humidity: { enabled: false, low: null, high: null },
     },
-    routine: { enabled: false, time: "09:00", label: "Verificar a planta" },
+    routine: { enabled: false, everyDays: 1, time: "09:00", label: "Verificar a planta" },
+  };
+}
+
+/** Upper bound for a routine interval, in days. */
+export const ROUTINE_DAYS_MAX = 60;
+
+export type PlantPreset = {
+  id: string;
+  name: string;
+  emoji: string;
+  /** One line under the picker, naming the plants it covers. */
+  summary: string;
+  warnings: Record<ReadingMetricKey, MetricWarning>;
+  routine: CareRoutine;
+};
+
+/**
+ * Starting points for the plants people usually keep. The thresholds assume the
+ * app's approximate soil and light scales and are deliberately generous — they
+ * are a substitute for knowing the species, not a substitute for watching the
+ * plant. Every field stays editable after a preset is picked.
+ */
+export const PLANT_PRESETS: ReadonlyArray<PlantPreset> = [
+  {
+    id: "succulent",
+    name: "Suculenta",
+    emoji: "🌵",
+    summary: "Cactos e suculentas: sol, solo seco e rega a cada 14 dias.",
+    warnings: {
+      soil: { enabled: true, low: 15, high: 85 },
+      light: { enabled: true, low: 800, high: null },
+      temperature: { enabled: true, low: 5, high: 35 },
+      humidity: { enabled: false, low: null, high: null },
+    },
+    routine: { enabled: true, everyDays: 14, time: "09:00", label: "Regar a suculenta" },
+  },
+  {
+    id: "fern",
+    name: "Samambaia",
+    emoji: "🌿",
+    summary: "Samambaias e avencas: sombra, ar úmido e rega a cada 3 dias.",
+    warnings: {
+      soil: { enabled: true, low: 50, high: 90 },
+      light: { enabled: true, low: 150, high: 2500 },
+      temperature: { enabled: true, low: 15, high: 28 },
+      humidity: { enabled: true, low: 50, high: null },
+    },
+    routine: { enabled: true, everyDays: 3, time: "08:00", label: "Borrifar e regar a samambaia" },
+  },
+  {
+    id: "tropical",
+    name: "Tropical",
+    emoji: "🌴",
+    summary: "Monstera e filodendro: luz indireta e rega a cada 7 dias.",
+    warnings: {
+      soil: { enabled: true, low: 35, high: 85 },
+      light: { enabled: true, low: 400, high: 4000 },
+      temperature: { enabled: true, low: 15, high: 30 },
+      humidity: { enabled: true, low: 40, high: null },
+    },
+    routine: { enabled: true, everyDays: 7, time: "09:00", label: "Regar a folhagem" },
+  },
+  {
+    id: "shade",
+    name: "Sombra",
+    emoji: "🪴",
+    summary: "Jiboia e zamioculca: pouca luz e rega a cada 10 dias.",
+    warnings: {
+      soil: { enabled: true, low: 25, high: 80 },
+      light: { enabled: true, low: 100, high: 2000 },
+      temperature: { enabled: true, low: 12, high: 30 },
+      humidity: { enabled: false, low: null, high: null },
+    },
+    routine: { enabled: true, everyDays: 10, time: "09:00", label: "Regar a planta de sombra" },
+  },
+  {
+    id: "orchid",
+    name: "Orquídea",
+    emoji: "🌸",
+    summary: "Orquídeas: luz indireta e rega a cada 7 dias, sem encharcar.",
+    warnings: {
+      soil: { enabled: true, low: 25, high: 70 },
+      light: { enabled: true, low: 300, high: 3000 },
+      temperature: { enabled: true, low: 15, high: 30 },
+      humidity: { enabled: true, low: 45, high: null },
+    },
+    routine: { enabled: true, everyDays: 7, time: "09:00", label: "Regar a orquídea" },
+  },
+  {
+    id: "herbs",
+    name: "Horta",
+    emoji: "🌱",
+    summary: "Manjericão e salsinha: muita luz e rega a cada 2 dias.",
+    warnings: {
+      soil: { enabled: true, low: 45, high: 85 },
+      light: { enabled: true, low: 1000, high: null },
+      temperature: { enabled: true, low: 15, high: 32 },
+      humidity: { enabled: true, low: 40, high: null },
+    },
+    routine: { enabled: true, everyDays: 2, time: "08:00", label: "Regar a horta" },
+  },
+];
+
+/** A mutable copy of a preset, stamped with the preset it came from. */
+export function presetSettings(preset: PlantPreset): DeviceNotificationSettings {
+  const warnings = {} as Record<ReadingMetricKey, MetricWarning>;
+
+  for (const metric of READING_METRICS) {
+    warnings[metric.key] = { ...preset.warnings[metric.key] };
+  }
+
+  return {
+    presetId: preset.id,
+    warnings,
+    routine: { ...preset.routine },
   };
 }
 
@@ -88,14 +215,14 @@ const WARNING_TITLES: Record<ReadingMetricKey, { low: string; high: string }> = 
 /** The plausible span of each reading, used to reject typos in the form. */
 const LIMIT_RANGE: Record<ReadingMetricKey, { min: number; max: number }> = {
   soil: { min: 0, max: 100 },
-  light: { min: 0, max: 100 },
+  light: { min: 0, max: 10_000 },
   temperature: { min: -10, max: 60 },
   humidity: { min: 0, max: 100 },
 };
 
 const METRIC_UNITS: Record<ReadingMetricKey, string> = {
-  soil: "/100",
-  light: "/100",
+  soil: "%",
+  light: "lx",
   temperature: "°C",
   humidity: "%",
 };
@@ -103,18 +230,22 @@ const METRIC_UNITS: Record<ReadingMetricKey, string> = {
 /** The smallest step the form accepts for a metric, e.g. 0.5 °C. */
 const METRIC_STEPS: Record<ReadingMetricKey, number> = {
   soil: 1,
-  light: 1,
+  light: 10,
   temperature: 0.5,
   humidity: 1,
 };
 
 const TIME_PATTERN = /^([01]\d|2[0-3]):([0-5]\d)$/;
 
-const SETTINGS_KEY = "plantkeeper.notification-settings";
+// Versioned because the light limits changed from the sensor's 0-100 index to
+// lux: reading the old key would silently reinterpret 25 as 25 lx.
+const SETTINGS_KEY = "plantkeeper.notification-settings.v2";
+const LEGACY_SETTINGS_KEY = "plantkeeper.notification-settings";
 const DISMISSALS_KEY = "plantkeeper.notification-dismissals";
 
 /** Dismissals older than this are dropped on the next write. */
-const DISMISSAL_KEEP_MS = 26 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+const DISMISSAL_KEEP_MS = (ROUTINE_DAYS_MAX + 2) * DAY_MS;
 
 type SettingsMap = Record<string, DeviceNotificationSettings>;
 type DismissalMap = Record<string, string>;
@@ -269,8 +400,11 @@ export function isValidTime(value: string): boolean {
 
 /** What the form holds while the user edits: raw input text, not numbers. */
 export type NotificationDraft = {
+  /** The chosen plant preset, or `null` for a custom setup. */
+  presetId: string | null;
   warnings: Record<ReadingMetricKey, { enabled: boolean; low: string; high: string }>;
   routineEnabled: boolean;
+  routineEveryDays: string;
   routineTime: string;
   routineLabel: string;
 };
@@ -289,8 +423,10 @@ export function toDraft(settings: DeviceNotificationSettings): NotificationDraft
   }
 
   return {
+    presetId: settings.presetId,
     warnings,
     routineEnabled: settings.routine.enabled,
+    routineEveryDays: String(settings.routine.everyDays),
     routineTime: settings.routine.time,
     routineLabel: settings.routine.label,
   };
@@ -331,16 +467,30 @@ export function fromDraft(
     return { error: "Informe o horário da rotina como 09:00." };
   }
 
+  const everyDays = parseRoutineDays(draft.routineEveryDays);
+  if (draft.routineEnabled && everyDays === null) {
+    return { error: `A rotina pode ser a cada 1 a ${ROUTINE_DAYS_MAX} dias.` };
+  }
+
   return {
     settings: {
+      presetId: draft.presetId,
       warnings,
       routine: {
         enabled: draft.routineEnabled,
+        everyDays: everyDays ?? 1,
         time: draft.routineTime.trim(),
         label: draft.routineLabel.trim() || defaultSettings().routine.label,
       },
     },
   };
+}
+
+/** Reads the repeat interval, or `null` when it is not a whole day count. */
+function parseRoutineDays(text: string): number | null {
+  const value = Number(text.trim());
+  if (!Number.isInteger(value) || value < 1 || value > ROUTINE_DAYS_MAX) return null;
+  return value;
 }
 
 /** Reads one threshold field, throwing a message the form can show. */
@@ -355,14 +505,14 @@ function parseLimit(text: string, key: ReadingMetricKey): number | null {
 
   if (!Number.isFinite(value)) throw new Error(`Use um número no limite de ${label}.`);
   if (value < min || value > max) {
-    throw new Error(`O limite de ${label} fica entre ${min} e ${max}.`);
+    throw new Error(`O limite de ${label} fica entre ${min} e ${max} ${METRIC_UNITS[key]}.`);
   }
 
   return value;
 }
 
 function metricLabel(key: ReadingMetricKey): string {
-  return READING_METRICS.find((metric) => metric.key === key)?.label.toLowerCase() ?? key;
+  return READING_METRICS.find((metric) => metric.key === key)?.name ?? key;
 }
 
 // ---------------------------------------------------------------------------
@@ -393,11 +543,11 @@ function warningsFor(device: Device, settings: DeviceNotificationSettings): AppN
         deviceId: device.id,
         deviceName: device.name,
         title: WARNING_TITLES[metric.key][side],
-        // The value carries its scale; the limit is the bare number, so the
-        // sentence does not say "/100" twice.
+        // Both values carry their unit, so "abaixo do limite de 200 lx" reads
+        // as a comparison of the same thing.
         detail:
-          `${metric.label} em ${metric.format(value)}, ` +
-          `${side === "low" ? "abaixo" : "acima"} do limite de ${metric.axisFormat(limit)}.`,
+          `${metric.name} em ${metric.format(value)}, ` +
+          `${side === "low" ? "abaixo" : "acima"} do limite de ${metric.format(limit)}.`,
         at: readings.capturedAt,
       });
     }
@@ -423,8 +573,12 @@ function routineFor(
     deviceId: device.id,
     deviceName: device.name,
     title: routine.label,
-    detail: `Rotina diária das ${routine.time}.`,
+    detail:
+      routine.everyDays === 1
+        ? `Rotina diária às ${routine.time}.`
+        : `Rotina a cada ${routine.everyDays} dias, às ${routine.time}.`,
     at: new Date(due).toISOString(),
+    everyDays: routine.everyDays,
   };
 }
 
@@ -443,10 +597,11 @@ function stillDismissed(
   const when = Date.parse(dismissedAt);
   if (Number.isNaN(when)) return false;
 
-  // A warning is snoozed; a routine marked done is done for the day.
+  // A warning is snoozed for an hour; a routine marked done stays quiet until
+  // its own interval has passed (the next day, for a daily one).
   return notification.kind === "warning"
     ? now - when < WARNING_SNOOZE_MS
-    : sameLocalDay(when, now);
+    : localDaysBetween(when, now) < (notification.everyDays ?? 1);
 }
 
 function pruneDismissals(map: DismissalMap, now: number): DismissalMap {
@@ -461,15 +616,15 @@ function pruneDismissals(map: DismissalMap, now: number): DismissalMap {
   return kept;
 }
 
-function sameLocalDay(a: number, b: number): boolean {
+function localDaysBetween(a: number, b: number): number {
   const first = new Date(a);
   const second = new Date(b);
 
-  return (
-    first.getFullYear() === second.getFullYear() &&
-    first.getMonth() === second.getMonth() &&
-    first.getDate() === second.getDate()
-  );
+  first.setHours(0, 0, 0, 0);
+  second.setHours(0, 0, 0, 0);
+
+  // Rounding keeps a DST change from turning seven days into "six".
+  return Math.round((second.getTime() - first.getTime()) / DAY_MS);
 }
 
 // ---------------------------------------------------------------------------
@@ -481,6 +636,14 @@ function sameLocalDay(a: number, b: number): boolean {
  * working centre, it just forgets the rules when the app closes.
  */
 function readStoredSettings(): SettingsMap {
+  // Drop the pre-lux key instead of leaving a stale copy next to the current
+  // one; it is never read again.
+  try {
+    window.localStorage.removeItem(LEGACY_SETTINGS_KEY);
+  } catch {
+    // Storage can be unavailable; nothing to clean up.
+  }
+
   const raw = readStored(SETTINGS_KEY);
   const stored = asRecord(raw);
   if (!stored) return {};
@@ -525,13 +688,23 @@ export function normalizeSettings(value: unknown): DeviceNotificationSettings {
     );
   }
 
+  const presetId = PLANT_PRESETS.some((preset) => preset.id === stored?.presetId)
+    ? (stored?.presetId as string)
+    : null;
+
   const time = storedRoutine?.time;
   const label = storedRoutine?.label;
+  const everyDays = storedRoutine?.everyDays;
 
   return {
+    presetId,
     warnings,
     routine: {
       enabled: booleanOr(storedRoutine?.enabled, defaults.routine.enabled),
+      everyDays:
+        typeof everyDays === "number" && Number.isInteger(everyDays)
+          ? Math.min(ROUTINE_DAYS_MAX, Math.max(1, everyDays))
+          : defaults.routine.everyDays,
       time: typeof time === "string" && isValidTime(time) ? time.trim() : defaults.routine.time,
       label:
         typeof label === "string" && label.trim()

@@ -1,4 +1,5 @@
 import { track, type Tracked } from "ripple";
+import { MetricIcon } from "./MetricIcon.tsrx";
 import { READING_METRICS, type ReadingMetricKey } from "../utils/devices";
 import {
   defaultSettings,
@@ -7,11 +8,15 @@ import {
   metricLimitRange,
   metricStep,
   metricUnit,
+  PLANT_PRESETS,
+  presetSettings,
+  ROUTINE_DAYS_MAX,
   ROUTINE_LABEL_MAX,
   saveSettings,
   toDraft,
   type NotificationDraft,
   type NotificationState,
+  type PlantPreset,
 } from "../utils/notifications";
 
 /** A fresh copy, so an edit never writes into the draft the form is showing. */
@@ -43,6 +48,9 @@ export function DeviceNotifications({
 }) @{
   const saved = track(() => deviceSettings(state.value, deviceId));
   const draft = track(toDraft(saved.value));
+  const activePreset = track(
+    () => PLANT_PRESETS.find((preset) => preset.id === draft.value.presetId) ?? null,
+  );
   const error = track<string | null>(null);
   const notice = track<string | null>(null);
 
@@ -54,9 +62,18 @@ export function DeviceNotifications({
     const next = copyDraft(draft.value);
     change(next);
 
+    // Any manual change leaves the preset behind: the stored id should describe
+    // the current rules, not the ones the user started from.
+    next.presetId = null;
     draft.value = next;
     error.value = null;
     notice.value = null;
+  }
+
+  function applyPreset(preset: PlantPreset) {
+    draft.value = toDraft(presetSettings(preset));
+    error.value = null;
+    notice.value = "Preset preenchido. Salve para aplicar.";
   }
 
   function toggleWarning(key: ReadingMetricKey) {
@@ -88,12 +105,9 @@ export function DeviceNotifications({
   }
 
   function restoreDefaults() {
-    const defaults = defaultSettings();
-
-    saveSettings(state, deviceId, defaults);
-    draft.value = toDraft(defaults);
+    draft.value = toDraft(defaultSettings());
     error.value = null;
-    notice.value = "Voltamos aos limites sugeridos.";
+    notice.value = "Padrões preenchidos. Salve para aplicar.";
   }
 
   <>
@@ -114,6 +128,66 @@ export function DeviceNotifications({
       }
 
       .rules-note {
+        margin: 0;
+        font-size: 0.8125rem;
+        line-height: 1.45;
+        color: var(--app-text-muted);
+      }
+
+      .rules-label {
+        font-size: 0.8125rem;
+        font-weight: 600;
+        letter-spacing: 0.01em;
+      }
+
+      .preset-block {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+      }
+
+      .presets {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.375rem;
+      }
+
+      .preset {
+        min-height: 2.25rem;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.375rem;
+        padding: 0.375rem 0.75rem;
+        border: 1px solid var(--app-control-border);
+        border-radius: 999px;
+        background: var(--app-card);
+        color: inherit;
+        font-family: inherit;
+        font-size: 0.8125rem;
+        font-weight: 600;
+        cursor: pointer;
+        touch-action: manipulation;
+        transition: border-color 0.2s ease, background-color 0.2s ease, color 0.2s ease;
+      }
+
+      .preset:focus-visible {
+        outline: 2px solid var(--app-accent);
+        outline-offset: 2px;
+      }
+
+      @media (hover: hover) {
+        .preset:hover {
+          border-color: var(--app-accent);
+        }
+      }
+
+      .preset-active {
+        border-color: var(--app-accent);
+        background: var(--app-accent);
+        color: #ffffff;
+      }
+
+      .preset-summary {
         margin: 0;
         font-size: 0.8125rem;
         line-height: 1.45;
@@ -143,6 +217,9 @@ export function DeviceNotifications({
       }
 
       .rule-name {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.375rem;
         font-size: 0.9375rem;
         font-weight: 600;
       }
@@ -188,16 +265,29 @@ export function DeviceNotifications({
       }
 
       .rule-limits {
-        display: flex;
-        flex-wrap: wrap;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
         gap: 0.5rem;
       }
 
+      /* The routine fields carry longer text, so they stack instead of sharing
+         a row where the label and the input compete for width. */
+      .rule-limits-single {
+        grid-template-columns: minmax(0, 1fr);
+      }
+
       .rule-field {
-        flex: 1 1 8rem;
         display: flex;
         align-items: center;
         gap: 0.375rem;
+        min-width: 0;
+      }
+
+      /* A long text value gets the whole row; its label sits above it. */
+      .rule-field-stacked {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 0.25rem;
       }
 
       .rule-field-label {
@@ -208,7 +298,8 @@ export function DeviceNotifications({
 
       /* 1rem text keeps mobile browsers from zooming in on focus. */
       .rule-input {
-        flex: 1;
+        flex: 1 1 auto;
+        width: auto;
         min-width: 0;
         min-height: 2.75rem;
         padding: 0.5rem 0.75rem;
@@ -231,6 +322,17 @@ export function DeviceNotifications({
         flex: none;
         font-size: 0.75rem;
         color: var(--app-text-muted);
+      }
+
+      /* Short fields do not need to stretch across the whole row. */
+      .rule-input-days {
+        flex: 0 1 5.5rem;
+        max-width: 5.5rem;
+      }
+
+      .rule-input-time {
+        flex: 0 1 10rem;
+        max-width: 10rem;
       }
 
       .rules-error {
@@ -309,22 +411,48 @@ export function DeviceNotifications({
     <section class="rules">
       <h2 class="rules-heading">Avisos e rotina</h2>
       <p class="rules-note">
-        O Plantkeeper avisa quando uma leitura passa dos limites que você escolher, e
-        lembra a rotina no horário marcado. Deixe um limite em branco para não ser
-        avisado daquele lado.
+        Escolha o tipo de planta para preencher limites e rotina. Depois ajuste o
+        que quiser; limite em branco: sem aviso daquele lado.
       </p>
 
       <form class="rules-form" onSubmit={submit}>
+        <div class="preset-block">
+          <span class="rules-label">Tipo de planta</span>
+          <div class="presets" role="group" aria-label="Preset de planta">
+            @for (const preset of PLANT_PRESETS; key preset.id) {
+              <button
+                class={`preset ${preset.id === draft.value.presetId ? "preset-active" : ""}`}
+                type="button"
+                aria-pressed={preset.id === draft.value.presetId}
+                onClick={() => {
+                  applyPreset(preset);
+                }}
+              >
+                <span aria-hidden="true">{preset.emoji}</span>
+                {preset.name}
+              </button>
+            }
+          </div>
+          <p class="preset-summary">
+            {activePreset.value
+              ? activePreset.value.summary
+              : "Personalizado: ajuste os limites e a rotina abaixo."}
+          </p>
+        </div>
+
         @for (const metric of READING_METRICS; key metric.key) {
           <div class="rule">
             <div class="rule-head">
-              <span class="rule-name">{metric.label}</span>
+              <span class="rule-name">
+                <MetricIcon metric={metric.key} />
+                {metric.label}
+              </span>
               <button
                 class={`rule-switch ${draft.value.warnings[metric.key].enabled ? "rule-switch-on" : ""}`}
                 type="button"
                 role="switch"
                 aria-checked={draft.value.warnings[metric.key].enabled}
-                aria-label={`Avisar sobre ${metric.label.toLowerCase()}`}
+                aria-label={`Avisar sobre ${metric.name}`}
                 onClick={() => {
                   toggleWarning(metric.key);
                 }}
@@ -346,7 +474,7 @@ export function DeviceNotifications({
                     max={metricLimitRange(metric.key).max}
                     step={metricStep(metric.key)}
                     placeholder="—"
-                    aria-label={`Avisar quando ${metric.label.toLowerCase()} ficar abaixo de`}
+                    aria-label={`Avisar quando ${metric.name} ficar abaixo de`}
                     value={draft.value.warnings[metric.key].low}
                     onInput={(event) => {
                       setLimit(metric.key, "low", event.currentTarget.value);
@@ -366,7 +494,7 @@ export function DeviceNotifications({
                     max={metricLimitRange(metric.key).max}
                     step={metricStep(metric.key)}
                     placeholder="—"
-                    aria-label={`Avisar quando ${metric.label.toLowerCase()} passar de`}
+                    aria-label={`Avisar quando ${metric.name} passar de`}
                     value={draft.value.warnings[metric.key].high}
                     onInput={(event) => {
                       setLimit(metric.key, "high", event.currentTarget.value);
@@ -381,13 +509,13 @@ export function DeviceNotifications({
 
         <div class="rule">
           <div class="rule-head">
-            <span class="rule-name">Rotina diária</span>
+            <span class="rule-name">Rotina</span>
             <button
               class={`rule-switch ${draft.value.routineEnabled ? "rule-switch-on" : ""}`}
               type="button"
               role="switch"
               aria-checked={draft.value.routineEnabled}
-              aria-label="Lembrar a rotina todos os dias"
+              aria-label="Lembrar a rotina"
               onClick={() => {
                 edit((next) => {
                   next.routineEnabled = !next.routineEnabled;
@@ -399,13 +527,35 @@ export function DeviceNotifications({
           </div>
 
           @if (draft.value.routineEnabled) {
-            <div class="rule-limits">
+            <div class="rule-limits rule-limits-single">
+              <div class="rule-field">
+                <label class="rule-field-label" for="rule-routine-days">A cada</label>
+                <input
+                  class="rule-input rule-input-days"
+                  id="rule-routine-days"
+                  type="number"
+                  inputMode="numeric"
+                  min={1}
+                  max={ROUTINE_DAYS_MAX}
+                  step={1}
+                  aria-label="Repetir a rotina a cada quantos dias"
+                  value={draft.value.routineEveryDays}
+                  onInput={(event) => {
+                    edit((next) => {
+                      next.routineEveryDays = event.currentTarget.value;
+                    });
+                  }}
+                />
+                <span class="rule-unit" aria-hidden="true">dias</span>
+              </div>
+
               <div class="rule-field">
                 <label class="rule-field-label" for="rule-routine-time">Às</label>
                 <input
-                  class="rule-input"
+                  class="rule-input rule-input-time"
                   id="rule-routine-time"
                   type="time"
+                  lang="pt-BR"
                   value={draft.value.routineTime}
                   onInput={(event) => {
                     edit((next) => {
@@ -415,8 +565,8 @@ export function DeviceNotifications({
                 />
               </div>
 
-              <div class="rule-field">
-                <label class="rule-field-label" for="rule-routine-label">O que fazer</label>
+              <div class="rule-field rule-field-stacked">
+                <label class="rule-field-label" for="rule-routine-label">Lembrete</label>
                 <input
                   class="rule-input"
                   id="rule-routine-label"
@@ -443,10 +593,10 @@ export function DeviceNotifications({
 
         <div class="rules-actions">
           <button class="rules-primary" type="submit" disabled={!dirty.value}>
-            Salvar avisos
+            Salvar
           </button>
           <button class="rules-link" type="button" onClick={restoreDefaults}>
-            Restaurar padrões
+            Padrões
           </button>
         </div>
       </form>

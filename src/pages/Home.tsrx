@@ -1,6 +1,7 @@
-import { effect, track } from "ripple";
+import { effect, track, untrack } from "ripple";
 import { AddDeviceFab } from "../components/AddDeviceFab.tsrx";
 import { DeviceDetail } from "../components/DeviceDetail.tsrx";
+import { MetricIcon } from "../components/MetricIcon.tsrx";
 import { NotificationBell, NotificationsPanel } from "../components/Notifications.tsrx";
 import { signOut } from "../utils/auth";
 import {
@@ -13,16 +14,19 @@ import {
   STATUS_LABELS,
   type Device,
   type DeviceReadings,
+  type ReadingMetricKey,
 } from "../utils/devices";
 import { describeError } from "../utils/errors";
+import { dismissNativeAlert, sendNativeAlerts, syncRoutineSchedules } from "../utils/nativeNotifications";
 import {
   createNotificationState,
+  deviceSettings,
   dismissNotification,
   evaluateNotifications,
   type AppNotification,
 } from "../utils/notifications";
 
-type DeviceMetric = { label: string; value: string };
+type DeviceMetric = { key: ReadingMetricKey; label: string; value: string };
 
 /** How often the notification centre re-reads the clock, in milliseconds. */
 const NOTIFICATION_TICK_MS = 30_000;
@@ -30,6 +34,7 @@ const NOTIFICATION_TICK_MS = 30_000;
 /** Flattens the nullable reading row into labels the card can loop over. */
 function metrics(readings: DeviceReadings): DeviceMetric[] {
   return READING_METRICS.map((metric) => ({
+    key: metric.key,
     label: metric.label,
     value: metric.format(readings[metric.key]),
   }));
@@ -113,6 +118,54 @@ export function Home() @{
     return () => clearInterval(timer);
   });
 
+  /**
+   * The phone is the place these alerts are meant to arrive. The in-app list is
+   * mirrored to the OS notification centre as new items appear, and the enabled
+   * routines are written to the mobile scheduler so they fire even when the app
+   * is closed. Both effects run through `untrack` so a poll that only refreshes
+   * readings does not reschedule everything.
+   */
+  const alertsSignature = track(() =>
+    notifications.value
+      .map((notification) => notification.id)
+      .sort()
+      .join("|"),
+  );
+
+  const routinesSignature = track(() =>
+    devices.value
+      .map((device) => {
+        const routine = deviceSettings(notificationState.value, device.id).routine;
+        const done = notificationState.value.dismissals[`routine:${device.id}`] ?? "";
+        return `${device.id}:${device.name}:${routine.enabled}:${routine.everyDays}:${routine.time}:${routine.label}:${done}`;
+      })
+      .join("|"),
+  );
+
+  effect(() => {
+    alertsSignature.value;
+    untrack(() => {
+      void sendNativeAlerts(notifications.value);
+    });
+  });
+
+  effect(() => {
+    routinesSignature.value;
+    untrack(() => {
+      void syncRoutineSchedules(devices.value, notificationState.value);
+    });
+  });
+
+  // A backgrounded phone webview pauses timers; catch up as soon as it returns.
+  effect(() => {
+    function handleVisibility() {
+      if (document.visibilityState === "visible") void refresh();
+    }
+
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => document.removeEventListener("visibilitychange", handleVisibility);
+  });
+
   /** Opens the vase a notification is about, if it is still on screen. */
   function openFromNotification(deviceId: string) {
     const device = devices.value.find((entry) => entry.id === deviceId);
@@ -123,6 +176,7 @@ export function Home() @{
   }
 
   function dismiss(notification: AppNotification) {
+    dismissNativeAlert(notification);
     dismissNotification(notificationState, notification);
   }
 
@@ -465,7 +519,7 @@ export function Home() @{
 
       .device-readings {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(4.5rem, 1fr));
+        grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 0.5rem;
         margin: 0;
       }
@@ -473,24 +527,27 @@ export function Home() @{
       .reading {
         display: flex;
         flex-direction: column;
-        gap: 0.125rem;
-        padding: 0.5rem 0.625rem;
-        border-radius: 0.75rem;
+        gap: 0.25rem;
+        padding: 0.625rem 0.75rem;
+        border-radius: 0.875rem;
         background: var(--app-surface);
       }
 
       .reading dt {
-        font-size: 0.6875rem;
+        display: flex;
+        align-items: center;
+        gap: 0.375rem;
+        font-size: 0.75rem;
         font-weight: 600;
-        letter-spacing: 0.06em;
-        text-transform: uppercase;
         color: var(--app-text-muted);
       }
 
       .reading dd {
         margin: 0;
-        font-size: 0.9375rem;
-        font-weight: 600;
+        font-size: 1.0625rem;
+        font-weight: 650;
+        font-variant-numeric: tabular-nums;
+        letter-spacing: -0.01em;
       }
 
       .device-note {
@@ -597,7 +654,7 @@ export function Home() @{
 
         @if (loading.value) {
           <section class="home-empty">
-            <p>Carregando seus dispositivos…</p>
+            <p>Carregando…</p>
           </section>
         } @else if (loadError.value) {
           <section class="home-empty">
@@ -615,11 +672,8 @@ export function Home() @{
           </section>
         } @else if (devices.value.length === 0) {
           <section class="home-empty">
-            <h1>Nenhuma planta ainda</h1>
-            <p>
-              Toque em + e digite o código que o dispositivo mostra para conectá-lo
-              ao Plantkeeper.
-            </p>
+            <h1>Nenhum vaso ainda</h1>
+            <p>Toque em + e informe o código que o vaso mostra.</p>
           </section>
         } @else {
           <ul class="device-list">
@@ -660,19 +714,22 @@ export function Home() @{
                 @if (device.readings) {
                   <>
                     <dl class="device-readings">
-                      @for (const metric of metrics(device.readings); key metric.label) {
+                      @for (const metric of metrics(device.readings); key metric.key) {
                         <div class="reading">
-                          <dt>{metric.label}</dt>
+                          <dt>
+                            <MetricIcon metric={metric.key} />
+                            {metric.label}
+                          </dt>
                           <dd>{metric.value}</dd>
                         </div>
                       }
                     </dl>
                     <p class="device-note">
-                      {`Última leitura ${formatLastSeen(device.readings.capturedAt)}.`}
+                      {`Leitura ${formatLastSeen(device.readings.capturedAt)}.`}
                     </p>
                   </>
                 } @else {
-                  <p class="device-note">Ainda sem leituras deste dispositivo.</p>
+                  <p class="device-note">Sem leituras ainda.</p>
                 }
               </li>
             }

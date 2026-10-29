@@ -1,0 +1,205 @@
+name: Android release
+
+# Builds a release APK signed with the upload keystore and attaches it to the
+# GitHub release for the tag.
+#
+# Required repository secrets:
+#   ANDROID_KEY_BASE64        base64 of the .jks, single line (`base64 -w0`)
+#   ANDROID_KEY_ALIAS         alias used with keytool
+#   ANDROID_KEY_PASSWORD      key password
+#   ANDROID_KEYSTORE_PASSWORD store password (optional; defaults to the key one)
+#   VITE_SUPABASE_URL         Supabase project URL embedded in the bundle
+#   VITE_SUPABASE_PUBLISHABLE_KEY publishable/anon key embedded in the bundle
+#
+# See the "Android releases" section in README.md.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v0.1.0). Defaults to v<app version>."
+        required: false
+        type: string
+  push:
+    tags:
+      - "v*"
+
+concurrency:
+  group: android-release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  android:
+    name: Build signed APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Setup Android NDK
+        id: setup-ndk
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r29
+          local-cache: true
+
+      # Workaround for nttld/setup-ndk#518: some NDK symlinks are left
+      # pointing at a temporary path, which breaks the Rust Android toolchain.
+      # Same fix Tauri uses in its own Android CI.
+      - name: Restore Android NDK symlinks
+        env:
+          NDK_HOST: linux-x86_64
+        run: |
+          set -euo pipefail
+          directory="${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/$NDK_HOST/bin"
+          find "$directory" -type l | while read -r link; do
+            current_target="$(readlink "$link")"
+            new_target="$directory/$(basename "$current_target")"
+            ln -sf "$new_target" "$link"
+          done
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ./src-tauri -> target
+          key: android
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.4"
+
+      - name: Install frontend dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Resolve version and release tag
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          VERSION="$(jq -r .version src-tauri/tauri.conf.json)"
+          if [ -n "$INPUT_TAG" ]; then
+            TAG="$INPUT_TAG"
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="v$VERSION"
+          else
+            TAG="${GITHUB_REF_NAME}"
+          fi
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+          echo "Building Plantkeeper $TAG (app version $VERSION)"
+
+      - name: Initialize Android project
+        env:
+          NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+          CI: "true"
+        run: |
+          set -euo pipefail
+          if [ ! -d src-tauri/gen/android ]; then
+            bun run tauri android init --ci --skip-targets-install
+          fi
+
+      - name: Configure Android signing
+        env:
+          ANDROID_KEY_BASE64: ${{ secrets.ANDROID_KEY_BASE64 }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          : "${ANDROID_KEY_BASE64:?ANDROID_KEY_BASE64 secret is required}"
+          : "${ANDROID_KEY_ALIAS:?ANDROID_KEY_ALIAS secret is required}"
+          : "${ANDROID_KEY_PASSWORD:?ANDROID_KEY_PASSWORD secret is required}"
+
+          printf '%s' "$ANDROID_KEY_BASE64" | tr -d '[:space:]' | base64 -d > "$RUNNER_TEMP/keystore.jks"
+
+          STORE_PASSWORD="${ANDROID_KEYSTORE_PASSWORD:-$ANDROID_KEY_PASSWORD}"
+          cat > src-tauri/gen/android/keystore.properties <<EOF
+          storeFile=$RUNNER_TEMP/keystore.jks
+          storePassword=$STORE_PASSWORD
+          keyPassword=$ANDROID_KEY_PASSWORD
+          keyAlias=$ANDROID_KEY_ALIAS
+          password=$STORE_PASSWORD
+          EOF
+
+          python3 .github/scripts/patch-android-signing.py
+
+      - name: Build signed APK
+        env:
+          NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+          CI: "true"
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
+        run: |
+          set -euo pipefail
+          : "${VITE_SUPABASE_URL:?VITE_SUPABASE_URL secret is required}"
+          : "${VITE_SUPABASE_PUBLISHABLE_KEY:?VITE_SUPABASE_PUBLISHABLE_KEY secret is required}"
+          bun run tauri android build --apk --ci
+
+      - name: Collect and verify APK
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+
+          APK_ROOT="src-tauri/gen/android/app/build/outputs/apk"
+          mapfile -t apks < <(find "$APK_ROOT" -type f -name '*.apk' ! -name '*-unsigned.apk' ! -path '*/debug/*' | sort)
+          if [ "${#apks[@]}" -eq 0 ]; then
+            echo "::error::No APK was produced under $APK_ROOT"
+            exit 1
+          fi
+
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          if [ ! -d "$SDK/build-tools" ]; then
+            echo "::error::Android SDK build-tools not found under $SDK"
+            exit 1
+          fi
+          APKSIGNER="$(find "$SDK/build-tools" -name apksigner -type f | sort -V | tail -n 1)"
+          if [ -z "$APKSIGNER" ]; then
+            echo "::error::apksigner not found under $SDK/build-tools"
+            exit 1
+          fi
+
+          for apk in "${apks[@]}"; do
+            target="release-assets/plantkeeper-${VERSION}-$(basename "$apk")"
+            cp "$apk" "$target"
+            echo "Verifying $target"
+            "$APKSIGNER" verify --print-certs "$target"
+          done
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: plantkeeper-android-${{ env.TAG }}
+          path: release-assets/*.apk
+          if-no-files-found: error
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ env.TAG }}
+          name: Plantkeeper ${{ env.TAG }}
+          body: |
+            APK assinado do Plantkeeper ${{ env.TAG }}.
+
+            Instale no Android com `adb install -r plantkeeper-*.apk`.
+          files: release-assets/*.apk
+          fail_on_unmatched_files: true
+          generate_release_notes: true

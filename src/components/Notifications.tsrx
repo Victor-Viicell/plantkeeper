@@ -470,8 +470,8 @@ export function NotificationsPanel({
               <span class="notice-empty-mark" aria-hidden="true">🌿</span>
               <p class="notice-empty-title">Tudo em ordem</p>
               <p class="notice-empty-note">
-                Nenhum aviso e nenhuma rotina pendente. Abra um vaso da lista para
-                escolher os limites e o horário da rotina.
+                Nenhum aviso ou rotina pendente. Abra um vaso para ajustar os limites
+                e a rotina.
               </p>
             </div>
           } @else {
@@ -498,7 +498,7 @@ export function NotificationsPanel({
                           onOpenDevice(item.deviceId);
                         }}
                       >
-                        Abrir o vaso
+                        Abrir
                       </button>
 
                       <button
@@ -508,7 +508,11 @@ export function NotificationsPanel({
                           onDismiss(item);
                         }}
                       >
-                        {item.kind === "routine" ? "Feito hoje" : `Dispensar ${SNOOZE_HOURS} h`}
+                        {item.kind === "routine"
+                          ? item.everyDays === 1
+                            ? "Feito hoje"
+                            : "Feito"
+                          : `Dispensar ${SNOOZE_HOURS} h`}
                       </button>
                     </div>
                   </li>
@@ -516,7 +520,7 @@ export function NotificationsPanel({
               </ul>
 
               <p class="notice-footnote">
-                {`Um aviso volta a aparecer depois de ${SNOOZE_HOURS} h; uma rotina marcada como feita só volta no dia seguinte.`}
+                {`Um aviso volta em ${SNOOZE_HOURS} h; uma rotina feita volta no próximo intervalo.`}
               </p>
             </>
           }

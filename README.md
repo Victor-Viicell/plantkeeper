@@ -6,10 +6,12 @@ temperature and air humidity. The vase itself is an ESP32 — the sibling
 how you give that vase a network, claim it as yours, name it, and watch its
 readings.
 
-Two of the four readings are **indices, not measurements**: the soil probe and
-the LDR sit on ADC pins that the firmware divides by full scale, and neither
-module is calibrated, so they are shown as `58/100` rather than dressed up as a
-percentage. Only the DHT22 reports real units (`24.3 °C`, `51%`).
+The firmware still publishes two of the four readings as an index on each
+module's own 0–100 scale. The app turns them into the units a person reads:
+soil as a percentage estimate, and the LDR index as approximate illuminance in
+lux (about 1 lx in the dark to 10 000 lx in direct sun, on a logarithmic curve).
+The DHT22 reports real units (`24,3 °C`, `51%`). None of these are calibrated
+measurements — the light figure is an estimate for the screen.
 
 It is built with [Ripple](https://www.ripple-ts.com) (`.tsrx` components) inside
 a Tauri shell. The shipping target is Android, where Bluetooth is how the vase
@@ -36,9 +38,60 @@ browser tab, but the shipping path is Android:
 bun run tauri android dev     # emulator or device
 ```
 
+On the first run, generate the Android Studio project with
+`bun run tauri android init`; it creates `src-tauri/gen/android`. Local release
+builds also need the signing setup described in
+[Android releases](#android-releases-github-actions).
+
 Read [Backend setup](#backend-setup) and [Authentication](#authentication) for
 the dashboard steps behind the live flow — both have settings that are easy to
 miss.
+
+## Android releases (GitHub Actions)
+
+`.github/workflows/android-release.yml` builds a **signed universal APK** and
+attaches it to a GitHub release. It runs on:
+
+- a pushed tag matching `v*` (for example `v0.1.0`);
+- manual `workflow_dispatch`, optionally with a tag (defaults to `v<app version>`).
+
+The runner initializes `src-tauri/gen/android` when it is not present, so the
+generated Android project does not need to be committed. It then injects the
+release signing config into the generated `app/build.gradle.kts` and builds with
+`tauri android build --apk`. The APK is verified with `apksigner` before it is
+attached to the release and uploaded as a workflow artifact.
+
+Secrets (Settings → Secrets and variables → Actions):
+
+| Secret | Meaning |
+| --- | --- |
+| `ANDROID_KEY_BASE64` | single-line base64 of the `.jks` |
+| `ANDROID_KEY_ALIAS` | key alias used with `keytool` |
+| `ANDROID_KEY_PASSWORD` | key password |
+| `ANDROID_KEYSTORE_PASSWORD` | store password (optional; falls back to `ANDROID_KEY_PASSWORD`) |
+| `VITE_SUPABASE_URL` | Supabase project URL embedded in the bundle |
+| `VITE_SUPABASE_PUBLISHABLE_KEY` | publishable/anon key embedded in the bundle |
+
+The two `VITE_` values are public by design — Vite inlines them into the app — but
+they are still kept as secrets so a release cannot be built against the wrong
+backend by accident. They are the same values as the local `.env`.
+
+Create the keystore once and keep it somewhere safe — losing it means an
+installed app can no longer be updated with the same signature:
+
+```bash
+keytool -genkey -v -keystore upload-keystore.jks \
+  -keyalg RSA -keysize 2048 -validity 10000 -alias upload
+base64 -w0 upload-keystore.jks > upload-keystore.b64
+# macOS: base64 -i upload-keystore.jks | tr -d '\n' > upload-keystore.b64
+```
+
+Copy the **single-line** contents of `upload-keystore.b64` into
+`ANDROID_KEY_BASE64`. Use a tag that matches the app version (`v` + the `version`
+in `src-tauri/tauri.conf.json`) so the release and the APK version agree.
+
+The workflow needs `contents: write` permission (already declared in the file),
+and a `GITHUB_TOKEN` is used for the release; no personal token is required.
 
 ## Backend setup
 
@@ -266,16 +319,17 @@ with a retry button.
 
 - the latest values and how old they are;
 - a chart of the last `HISTORY_LIMIT` samples (60 — about 15 minutes at one
-  reading per 15 s), switchable between the four metrics. The two sensor indices
-  are drawn against a fixed 0–100 scale so two visits are comparable; temperature
-  scales to its own range. The chart keeps following the vase while it is open;
+  reading per 15 s), switchable between the four metrics. Soil and air humidity
+  are drawn against a fixed 0–100 scale so two visits are comparable; light
+  (lux) and temperature scale to their own range. The chart keeps following the
+  vase while it is open;
 - **rename** — the name is stored on `devices.name`;
 - **remove** — releases the vase back to unclaimed. The rows are not deleted:
   the vase keeps its identity and its readings, and the same claim code works
   again (for you or for someone else). It asks for confirmation first, because
   the app cannot undo a release on someone else's behalf;
-- **avisos e rotina** — the rules behind that vase's notifications: which
-  readings should warn, and the time of its daily routine.
+- **avisos e rotina** — the rules behind that vase's notifications: a plant
+  preset, which readings should warn, and how often its routine repeats.
 
 Renaming is a direct `update` on `devices`, scoped by the `devices_update_own`
 policy, and it reads the row back — so an update that matched nothing (a vase
@@ -292,25 +346,60 @@ ownership itself. See `releaseCloudDevice()` in `src/utils/devices.ts`.
 or due right now, and everything in it is worked out on the client from readings
 the app already has — nothing there talks to Supabase.
 
-- **Warnings** come from the newest reading of a vase: soil below 35/100, air
-  above 32 °C, and so on. The limits are per vase, an empty field means "no limit
-  on that side", and the values a new vase starts with are the usual ones for a
-  potted plant — air humidity is recorded but stays quiet until asked to speak. A
-  vase that stopped reporting raises no warnings: its newest reading is stale,
-  and an alert about it would be about a pot nobody has touched since the vase
-  went quiet.
-- **Routines** are a daily reminder at a fixed time — "Verificar a planta" at
-  09:00 — one per vase, off until switched on.
-- **Dispensar** hides a warning for an hour; **Feito hoje** marks a routine as
-  done for the rest of the day. Both come back on their own, so neither can hide
-  a problem for good. **Abrir o vaso** jumps to the vase a notification is about.
+- **Warnings** come from the newest reading of a vase: soil below 35%, light
+  below 200 lx, air above 32 °C, and so on. The limits are per vase, an empty
+  field means "no limit on that side", and the values a new vase starts with are
+  the usual ones for a potted plant — air humidity is recorded but stays quiet
+  until asked to speak. A vase that stopped reporting raises no warnings: its
+  newest reading is stale, and an alert about it would be about a pot nobody has
+  touched since the vase went quiet.
+- **Presets** for the plants people usually keep — succulent/cactus, fern,
+  tropical foliage, low-light plants, orchid and herbs — fill the warning limits
+  and the routine in one tap. They are deliberately generous starting points for
+  someone who does not know the species, not horticultural truth; every field
+  stays editable, and changing one switches the vase to "custom".
+- **Routines** are a reminder every N days at a fixed time — "Regar a samambaia"
+  every 3 days at 08:00 — one per vase, off until switched on. A routine stays
+  due until it is marked done; marking it done ("Feito") starts the next
+  interval.
+- **Dispensar** hides a warning for an hour; **Feito** marks a routine as done
+  and it returns after its interval. Both come back on their own, so neither can
+  hide a problem for good. **Abrir** jumps to the vase a notification is about.
 
 The rules and the dismissals are per device and kept in `localStorage`
-(`plantkeeper.notification-settings` and `plantkeeper.notification-dismissals`),
-next to the device stand-in: they survive a reload, need no backend, and behave
-the same with real sign-in and with the offline stand-in. They are **not** synced to
-the account, so a fresh install starts from the defaults again — and releasing a
-vase forgets its rules along with it.
+(`plantkeeper.notification-settings.v2` and
+`plantkeeper.notification-dismissals`), next to the device stand-in: they survive
+a reload, need no backend, and behave the same with real sign-in and with the
+offline stand-in. The settings key is versioned because light limits changed
+from the sensor's 0–100 index to lux; older settings are ignored. They are **not**
+synced to the account, so a fresh install starts from the defaults again — and
+releasing a vase forgets its rules along with it.
+
+### Notifications on the phone
+
+The Tauri build mirrors the in-app centre to the operating system:
+
+- on the first Home mount the app asks for notification permission and creates
+the Android channel **Avisos das plantas**;
+- warnings are delivered as soon as the app observes the reading — at most once
+per warning per day, so the 15 s poll cannot turn into a stream of alerts;
+- routines are scheduled on the phone for the next eight occurrences, so they
+fire even when the app is closed. Marking one **Feito** moves its schedule to
+the next interval;
+- a warning cannot be scheduled ahead of time because the next reading is not
+known yet. True background warnings would need push (FCM/APNs) and a server-side
+check; the native notification here fires while the app is open or when it
+resumes.
+
+In a browser tab the OS integration is skipped, and the bell remains the only
+place alerts appear. The dedupe map lives in
+`plantkeeper.native-alerts.v1`.
+
+A version marker (`plantkeeper.native-notifications.version`) clears schedules
+and delivered toasts from an older build on the first launch after an update,
+so an installed phone does not keep showing notifications written with previous
+labels or units. Bump `NATIVE_VERSION` in `src/utils/nativeNotifications.ts`
+whenever the notification copy or ids change.
 
 ## Recommended IDE Setup
 

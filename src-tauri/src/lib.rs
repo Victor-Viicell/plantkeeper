@@ -3,6 +3,10 @@
 pub fn run() {
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        // Local notifications for warnings and routines. On Android the first
+        // call asks for the system permission and opens the "Avisos das
+        // plantas" channel; on desktop it behaves as an ordinary toast.
+        .plugin(tauri_plugin_notification::init())
         // Sign-in comes back from the browser as a deep link. The Android intent
         // filter is generated from `plugins.deep-link` in tauri.conf.json when
         // the CLI builds for Android, so no manifest is edited by hand.

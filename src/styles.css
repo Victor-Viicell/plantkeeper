@@ -30,6 +30,12 @@
   --app-accent: #34a853;
   --app-callout: #b3261e;
   --app-shadow: 0 18px 40px rgba(24, 46, 28, 0.1);
+
+  /* One colour per reading, used by the metric icons and nothing else. */
+  --app-metric-soil: #2f8f57;
+  --app-metric-light: #b47900;
+  --app-metric-temperature: #c05a2c;
+  --app-metric-humidity: #2f7fb5;
 }
 
 *,
@@ -67,5 +73,30 @@ body {
     --app-text-muted: #a3ada5;
     --app-callout: #f2b8b5;
     --app-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+
+    --app-metric-soil: #6fd394;
+    --app-metric-light: #f0c05a;
+    --app-metric-temperature: #f08a6b;
+    --app-metric-humidity: #6fb8e8;
   }
+}
+
+.metric-icon {
+  flex: none;
+}
+
+.metric-icon-soil {
+  color: var(--app-metric-soil);
+}
+
+.metric-icon-light {
+  color: var(--app-metric-light);
+}
+
+.metric-icon-temperature {
+  color: var(--app-metric-temperature);
+}
+
+.metric-icon-humidity {
+  color: var(--app-metric-humidity);
 }

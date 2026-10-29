@@ -19,7 +19,9 @@ export type DeviceStatus = "online" | "offline";
 
 /** The newest upload from a device, as shown on its card. */
 export type DeviceReadings = {
+  /** Soil probe scale, 0-100 (shown as a percentage estimate). */
   soil: number | null;
+  /** Illuminance in lux, converted from the firmware's 0-100 light index. */
   light: number | null;
   temperature: number | null;
   humidity: number | null;
@@ -47,30 +49,59 @@ export const STATUS_LABELS: Record<DeviceStatus, string> = {
  * the range a chart should draw them against (`null` = scale to the samples).
  * Shared so a label or a unit never drifts between the list and the detail view.
  *
- * `format` is what a person reads; `axisFormat` is what the chart's scale shows,
- * where the unit would only repeat on every tick.
+ * `label` is the short word a tile shows; `name` is the readable name used in
+ * sentences and accessible labels. `format` is what a person reads; `axisFormat`
+ * is what the chart's scale shows, where the unit would only repeat on every tick.
  */
 export const READING_METRICS: ReadonlyArray<{
   key: "soil" | "light" | "temperature" | "humidity";
   label: string;
+  name: string;
+  unit: string;
   max: number | null;
   format: (value: number | null) => string;
   axisFormat: (value: number | null) => string;
 }> = [
-  // The two ADC channels are reported as an index on the sensor's own scale, not
-  // as a unit: nothing here is calibrated, so "58/100" claims nothing that
-  // "58%" would not.
-  { key: "soil", label: "Umidade do solo", max: 100, format: formatIndex, axisFormat: formatIndexTick },
-  { key: "light", label: "Luz", max: 100, format: formatIndex, axisFormat: formatIndexTick },
-  // The DHT22 reports real units, so these two keep theirs.
+  // The soil probe is still its own 0-100 scale, so the percentage is an
+  // estimate of how wet the pot is, not a measured water content.
+  {
+    key: "soil",
+    label: "Solo",
+    name: "umidade do solo",
+    unit: "%",
+    max: 100,
+    format: formatPercent,
+    axisFormat: formatPercentTick,
+  },
+  // Light arrives as an index and is shown in lux: it is the unit a light
+  // sensor actually measures, and the one a person can judge a room by.
+  {
+    key: "light",
+    label: "Luz",
+    name: "iluminação",
+    unit: "lx",
+    max: null,
+    format: formatLux,
+    axisFormat: formatLuxTick,
+  },
   {
     key: "temperature",
-    label: "Temperatura do ar",
+    label: "Temp.",
+    name: "temperatura do ar",
+    unit: "°C",
     max: null,
     format: formatTemperature,
-    axisFormat: formatTemperature,
+    axisFormat: formatTemperatureTick,
   },
-  { key: "humidity", label: "Umidade do ar", max: 100, format: formatPercent, axisFormat: formatPercent },
+  {
+    key: "humidity",
+    label: "Umidade",
+    name: "umidade do ar",
+    unit: "%",
+    max: 100,
+    format: formatPercent,
+    axisFormat: formatPercentTick,
+  },
 ];
 
 export type ReadingMetricKey = (typeof READING_METRICS)[number]["key"];
@@ -390,7 +421,7 @@ function mockReadings(hardwareId: string, now: number): DeviceReadings {
 
   return {
     soil: level(42, 18, 900_000, 0),
-    light: level(55, 35, 600_000, 3.1),
+    light: indexToLux(level(55, 35, 600_000, 3.1)),
     temperature: Math.round((24 + 4 * swing(1_800_000, 0.6)) * 10) / 10,
     humidity: level(58, 12, 1_500_000, 2.4),
     capturedAt: new Date(now).toISOString(),
@@ -427,7 +458,7 @@ function toDevice(row: DeviceRow, readings: DeviceReadings | null): Device {
 function toReadings(row: ReadingRow): DeviceReadings {
   return {
     soil: row.soil,
-    light: row.light,
+    light: indexToLux(row.light),
     temperature: row.temperature,
     humidity: row.humidity,
     capturedAt: row.created_at,
@@ -452,7 +483,7 @@ export function formatLastSeen(lastSeenAt: string | null): string {
   if (Number.isNaN(seen)) return "Nunca conectado";
 
   const seconds = Math.max(0, Math.round((Date.now() - seen) / 1000));
-  if (seconds < 60) return "Agora mesmo";
+  if (seconds < 60) return "agora";
 
   const minutes = Math.round(seconds / 60);
   if (minutes < 60) return `${minutes} min atrás`;
@@ -470,20 +501,42 @@ export function formatPercent(value: number | null): string {
   return typeof value === "number" ? `${Math.round(value)}%` : "—";
 }
 
-/**
- * An ADC channel, shown as a position on the sensor's own 0-100 scale. The
- * firmware divides a raw 12-bit sample by 4095, so this is an index — calling it
- * a percentage would claim a calibration that has never been done.
- */
-export function formatIndex(value: number | null): string {
-  return typeof value === "number" ? `${Math.round(value)}/100` : "—";
+/** Percent without the sign, for a chart tick. */
+export function formatPercentTick(value: number | null): string {
+  return typeof value === "number" ? String(Math.round(value)) : "—";
 }
 
-/** The same index without the scale, for a chart tick. */
-export function formatIndexTick(value: number | null): string {
+/**
+ * The firmware publishes light as an index on the LDR's own 0-100 scale. This
+ * maps it onto approximate illuminance: 0 lx in the dark and 10 000 lx at the
+ * bright end, on the logarithmic curve an LDR roughly follows. It is an estimate
+ * for the screen, not a calibrated measurement.
+ */
+export function indexToLux(index: number | null): number | null {
+  if (typeof index !== "number") return null;
+
+  const normalized = Math.min(100, Math.max(0, index)) / 100;
+  if (normalized === 0) return 0;
+
+  return Math.round(10_000 ** normalized);
+}
+
+/** Illuminance with the thousands separator a pt-BR reader expects. */
+export function formatLux(value: number | null): string {
+  return typeof value === "number"
+    ? `${Math.round(value).toLocaleString("pt-BR")} lx`
+    : "—";
+}
+
+/** The same value without the unit, for a chart tick. */
+export function formatLuxTick(value: number | null): string {
   return typeof value === "number" ? String(Math.round(value)) : "—";
 }
 
 export function formatTemperature(value: number | null): string {
-  return typeof value === "number" ? `${value.toFixed(1)} °C` : "—";
+  return typeof value === "number" ? `${value.toFixed(1).replace(".", ",")} °C` : "—";
+}
+
+export function formatTemperatureTick(value: number | null): string {
+  return typeof value === "number" ? value.toFixed(1).replace(".", ",") : "—";
 }

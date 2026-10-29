@@ -1,5 +1,6 @@
 import { effect, track, type Tracked } from "ripple";
 import { DeviceNotifications } from "./DeviceNotifications.tsrx";
+import { MetricIcon } from "./MetricIcon.tsrx";
 import { forgetDeviceNotifications, type NotificationState } from "../utils/notifications";
 import {
   DEVICE_REFRESH_MS,
@@ -156,14 +157,15 @@ export function DeviceDetail({
   const lastSampleText = track(() => {
     const sample = history.value[history.value.length - 1];
     return sample
-      ? `Última leitura ${formatLastSeen(sample.capturedAt)}.`
-      : "Ainda sem leituras deste dispositivo.";
+      ? `Leitura ${formatLastSeen(sample.capturedAt)}.`
+      : "Sem leituras ainda.";
   });
 
   /** The tiles read the newest sample, so they follow the same refresh. */
   const tiles = track(() => {
     const sample = history.value[history.value.length - 1];
     return READING_METRICS.map((entry) => ({
+      key: entry.key,
       label: entry.label,
       value: entry.format(sample?.[entry.key] ?? null),
     }));
@@ -175,7 +177,7 @@ export function DeviceDetail({
     const entry = readingMetric(metric.value);
     return (
       `${entry.label} nas últimas ${values.value.length} leituras, ` +
-      `de ${entry.axisFormat(sample.lo)} a ${entry.axisFormat(sample.hi)}.`
+      `de ${entry.axisFormat(sample.lo)} a ${entry.axisFormat(sample.hi)} ${entry.unit}.`
     );
   });
 
@@ -359,13 +361,22 @@ export function DeviceDetail({
       }
 
       .detail-section {
+        display: flex;
+        align-items: baseline;
+        gap: 0.375rem;
         margin: 0;
         font-size: 0.9375rem;
       }
 
+      .detail-unit {
+        font-size: 0.75rem;
+        font-weight: 600;
+        color: var(--app-text-muted);
+      }
+
       .detail-tiles {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(4.5rem, 1fr));
+        grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 0.5rem;
         margin: 0;
       }
@@ -373,24 +384,27 @@ export function DeviceDetail({
       .detail-tile {
         display: flex;
         flex-direction: column;
-        gap: 0.125rem;
-        padding: 0.5rem 0.625rem;
-        border-radius: 0.75rem;
+        gap: 0.25rem;
+        padding: 0.625rem 0.75rem;
+        border-radius: 0.875rem;
         background: var(--app-surface);
       }
 
       .detail-tile dt {
-        font-size: 0.6875rem;
+        display: flex;
+        align-items: center;
+        gap: 0.375rem;
+        font-size: 0.75rem;
         font-weight: 600;
-        letter-spacing: 0.06em;
-        text-transform: uppercase;
         color: var(--app-text-muted);
       }
 
       .detail-tile dd {
         margin: 0;
-        font-size: 0.9375rem;
-        font-weight: 600;
+        font-size: 1.125rem;
+        font-weight: 650;
+        font-variant-numeric: tabular-nums;
+        letter-spacing: -0.01em;
       }
 
       /* Metric picker: a row of pills that can wrap on a narrow phone. */
@@ -402,6 +416,9 @@ export function DeviceDetail({
 
       .detail-metric {
         min-height: 2.25rem;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.375rem;
         padding: 0.375rem 0.75rem;
         border: 1px solid var(--app-control-border);
         border-radius: 999px;
@@ -429,6 +446,10 @@ export function DeviceDetail({
       .detail-metric-active {
         border-color: var(--app-accent);
         background: var(--app-accent);
+        color: #ffffff;
+      }
+
+      .detail-metric-active .metric-icon {
         color: #ffffff;
       }
 
@@ -687,15 +708,18 @@ export function DeviceDetail({
           </div>
 
           @if (loading.value) {
-            <p class="detail-note">Carregando as leituras…</p>
+            <p class="detail-note">Carregando…</p>
           } @else if (!hasSamples.value) {
             <p class="detail-note">{lastSampleText.value}</p>
           } @else {
             <>
               <dl class="detail-tiles">
-                @for (const tile of tiles.value; key tile.label) {
+                @for (const tile of tiles.value; key tile.key) {
                   <div class="detail-tile">
-                    <dt>{tile.label}</dt>
+                    <dt>
+                      <MetricIcon metric={tile.key} />
+                      {tile.label}
+                    </dt>
                     <dd>{tile.value}</dd>
                   </div>
                 }
@@ -721,7 +745,10 @@ export function DeviceDetail({
         </section>
 
         <section class="detail-card">
-          <h2 class="detail-section">Histórico</h2>
+          <h2 class="detail-section">
+            Histórico
+            <span class="detail-unit">{readingMetric(metric.value).unit}</span>
+          </h2>
 
           <div class="detail-metrics" role="group" aria-label="Escolha o que acompanhar">
             @for (const entry of READING_METRICS; key entry.key) {
@@ -733,6 +760,7 @@ export function DeviceDetail({
                   metric.value = entry.key;
                 }}
               >
+                <MetricIcon metric={entry.key} />
                 {entry.label}
               </button>
             }
@@ -769,7 +797,7 @@ export function DeviceDetail({
               </svg>
             </figure>
           } @else {
-            <p class="detail-note">Ainda não há amostras para desenhar.</p>
+            <p class="detail-note">Sem amostras ainda.</p>
           }
         </section>
 
@@ -777,7 +805,7 @@ export function DeviceDetail({
           <h2 class="detail-section">Nome</h2>
 
           <form class="detail-form" onSubmit={submitRename}>
-            <label class="detail-label" for="detail-name">Como você chama este vaso</label>
+            <label class="detail-label" for="detail-name">Nome do vaso</label>
             <input
               class="detail-input"
               id="detail-name"
@@ -801,7 +829,7 @@ export function DeviceDetail({
                 !draftName.value.trim() ||
                 draftName.value.trim() === name.value}
             >
-              {renaming.value ? "Salvando…" : "Salvar nome"}
+              {renaming.value ? "Salvando…" : "Salvar"}
             </button>
           </form>
         </section>
@@ -811,8 +839,7 @@ export function DeviceDetail({
         <section class="detail-card">
           <h2 class="detail-section">Remover</h2>
           <p class="detail-note">
-            O vaso volta a ficar livre para ser conectado de novo — por você ou por outra
-            pessoa. As leituras já enviadas continuam guardadas.
+            O vaso fica livre para ser conectado de novo. As leituras continuam salvas.
           </p>
 
           @if (confirmingRelease.value) {
@@ -823,7 +850,7 @@ export function DeviceDetail({
                 disabled={releasing.value}
                 onClick={remove}
               >
-                {releasing.value ? "Removendo…" : "Remover mesmo assim"}
+                {releasing.value ? "Removendo…" : "Remover"}
               </button>
               <button
                 class="detail-link"
@@ -845,7 +872,7 @@ export function DeviceDetail({
                 releaseError.value = null;
               }}
             >
-              Remover dispositivo
+              Remover vaso
             </button>
           }
 

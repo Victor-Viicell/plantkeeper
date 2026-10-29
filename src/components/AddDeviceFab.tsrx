@@ -9,13 +9,13 @@ import {
 
 /** Progress copy for the states the vase reports over Bluetooth. */
 const STATUS_TEXT: Record<string, string> = {
-  advertising: "Aguardando o aplicativo…",
-  idle: "Conectado ao dispositivo.",
+  advertising: "Aguardando o app…",
+  idle: "Conectado ao vaso.",
   received: "Credenciais recebidas…",
   connecting: "Entrando na rede…",
   connected: "Wi-Fi configurado!",
-  failed: "O dispositivo não conseguiu entrar na rede.",
-  timeout: "O dispositivo desistiu de esperar.",
+  failed: "Não entrou na rede.",
+  timeout: "Tempo esgotado.",
 };
 
 function describeError(cause: unknown, fallback: string): string {
@@ -114,7 +114,7 @@ export function AddDeviceFab({
       .then((devices) => {
         found.value = devices;
         if (devices.length === 0) {
-          bluetoothError.value = "Nenhum dispositivo encontrado. Aproxime o vaso e tente de novo.";
+          bluetoothError.value = "Nenhum vaso encontrado. Aproxime e tente de novo.";
         }
       })
       .catch((cause) => {
@@ -557,7 +557,7 @@ export function AddDeviceFab({
         <button
           class="fab"
           type="button"
-          aria-label="Conectar um dispositivo"
+          aria-label="Conectar um vaso"
           aria-haspopup="dialog"
           aria-expanded={open.value}
           onClick={() => {
@@ -587,7 +587,7 @@ export function AddDeviceFab({
           onClick={(event) => event.stopPropagation()}
         >
           <div class="sheet-header">
-            <h2 class="sheet-title" id="add-device-title">Conectar um dispositivo</h2>
+            <h2 class="sheet-title" id="add-device-title">Conectar vaso</h2>
             <button class="sheet-close" type="button" aria-label="Fechar" onClick={close}>
               <svg class="fab-icon" viewBox="0 0 24 24" aria-hidden="true">
                 <path
@@ -602,23 +602,22 @@ export function AddDeviceFab({
           </div>
 
           <p class="sheet-lead">
-            Ligue o vaso e envie o Wi-Fi do seu celular por Bluetooth. Depois, digite
-            o código que ele mostra para confirmar.
+            Ligue o vaso e envie o Wi-Fi do celular por Bluetooth. Depois, confirme o
+            código que ele mostra.
           </p>
 
           <section class="ble">
-            <h3 class="ble-title">Wi-Fi do dispositivo</h3>
+            <h3 class="ble-title">Wi-Fi do vaso</h3>
 
             @if (!isBluetoothAvailable()) {
               <p class="ble-note">
-                A configuração por Bluetooth está disponível no aplicativo instalado.
-                No navegador, use o código do dispositivo abaixo para conectar um vaso
-                que já esteja na rede.
+                A configuração por Bluetooth funciona no app instalado. No navegador,
+                use o código do vaso abaixo.
               </p>
             } @else if (!selected.value) {
               <>
                 <p class="ble-note">
-                  Aproxime o vaso que ainda não tem rede e procure por ele.
+                  Aproxime o vaso e procure.
                 </p>
 
                 <button
@@ -627,7 +626,7 @@ export function AddDeviceFab({
                   disabled={scanning.value}
                   onClick={findVases}
                 >
-                  {scanning.value ? "Procurando…" : "Procurar dispositivos"}
+                  {scanning.value ? "Procurando…" : "Procurar"}
                 </button>
 
                 @if (found.value.length > 0) {
@@ -650,12 +649,11 @@ export function AddDeviceFab({
             } @else {
               <>
                 <p class="ble-note">
-                  Enviando sua rede para{" "}
-                  <strong>{selected.value.name}</strong>.
+                  Enviando a rede para <strong>{selected.value.name}</strong>.
                 </p>
 
                 <form class="add-form" onSubmit={sendWifi}>
-                  <label class="add-label" for="ble-ssid">Nome da rede</label>
+                  <label class="add-label" for="ble-ssid">Rede</label>
                   <input
                     class="add-input"
                     id="ble-ssid"
@@ -693,7 +691,7 @@ export function AddDeviceFab({
                       type="submit"
                       disabled={provisioning.value || !wifiSsid.value.trim()}
                     >
-                      {provisioning.value ? "Enviando…" : "Enviar para o dispositivo"}
+                      {provisioning.value ? "Enviando…" : "Enviar"}
                     </button>
                     <button
                       class="ble-link"
@@ -720,7 +718,7 @@ export function AddDeviceFab({
           <hr class="ble-divider" />
 
           <form class="add-form" onSubmit={submitClaim}>
-            <label class="add-label" for="device-claim-code">Código do dispositivo</label>
+            <label class="add-label" for="device-claim-code">Código do vaso</label>
             <input
               class="add-input add-code"
               id="device-claim-code"
@@ -745,7 +743,7 @@ export function AddDeviceFab({
               type="submit"
               disabled={busy.value || !claimCode.value.trim()}
             >
-              {busy.value ? "Conectando…" : "Conectar dispositivo"}
+              {busy.value ? "Conectando…" : "Conectar"}
             </button>
           </form>
         </section>
