@@ -61,7 +61,8 @@ release signing config into the generated `app/build.gradle.kts` and builds with
 `tauri android build --apk`. The APK is verified with `apksigner` before it is
 attached to the release and uploaded as a workflow artifact.
 
-Secrets (Settings → Secrets and variables → Actions):
+Secrets (Settings → Secrets and variables → Actions → **New repository
+secret**):
 
 | Secret | Meaning |
 | --- | --- |
@@ -86,9 +87,22 @@ base64 -w0 upload-keystore.jks > upload-keystore.b64
 # macOS: base64 -i upload-keystore.jks | tr -d '\n' > upload-keystore.b64
 ```
 
+If `keytool` is not on `PATH`, use the JDK bundled with Android Studio (for
+example `/opt/android-studio/jbr/bin/keytool`).
+
 Copy the **single-line** contents of `upload-keystore.b64` into
-`ANDROID_KEY_BASE64`. Use a tag that matches the app version (`v` + the `version`
-in `src-tauri/tauri.conf.json`) so the release and the APK version agree.
+`ANDROID_KEY_BASE64`, the alias (`upload` above) into `ANDROID_KEY_ALIAS`, and
+the passwords into `ANDROID_KEY_PASSWORD` / `ANDROID_KEYSTORE_PASSWORD`.
+
+The Supabase values are the same as your local `.env`:
+
+```bash
+grep -E '^VITE_SUPABASE_(URL|PUBLISHABLE_KEY)=' .env
+```
+
+Use the **publishable/anon** key, never the service-role key. Use a tag that
+matches the app version (`v` + the `version` in `src-tauri/tauri.conf.json`) so
+the release and the APK version agree.
 
 The workflow needs `contents: write` permission (already declared in the file),
 and a `GITHUB_TOKEN` is used for the release; no personal token is required.

@@ -39,10 +39,31 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
+
+      - name: Verify release secrets
+        env:
+          ANDROID_KEY_BASE64: ${{ secrets.ANDROID_KEY_BASE64 }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
+        run: |
+          set -euo pipefail
+          missing=()
+          [ -n "${ANDROID_KEY_BASE64:-}" ] || missing+=("ANDROID_KEY_BASE64")
+          [ -n "${ANDROID_KEY_ALIAS:-}" ] || missing+=("ANDROID_KEY_ALIAS")
+          [ -n "${ANDROID_KEY_PASSWORD:-}" ] || missing+=("ANDROID_KEY_PASSWORD")
+          [ -n "${VITE_SUPABASE_URL:-}" ] || missing+=("VITE_SUPABASE_URL")
+          [ -n "${VITE_SUPABASE_PUBLISHABLE_KEY:-}" ] || missing+=("VITE_SUPABASE_PUBLISHABLE_KEY")
+          if [ "${#missing[@]}" -ne 0 ]; then
+            echo "::error::Missing repository secrets: ${missing[*]}."
+            echo "See README.md#android-releases-github-actions for how to create and set them."
+            exit 1
+          fi
 
       - name: Setup Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "21"
