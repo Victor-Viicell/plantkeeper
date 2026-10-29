@@ -1,6 +1,6 @@
 [package]
 name = "plantkeeper"
-version = "0.1.0"
+version = "0.1.1"
 description = "Companion app for the Plantkeeper vase: Wi-Fi provisioning over BLE, claiming, and readings."
 authors = ["viicell"]
 edition = "2021"

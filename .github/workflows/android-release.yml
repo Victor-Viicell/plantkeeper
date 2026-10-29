@@ -136,6 +136,9 @@ jobs:
             bun run tauri android init --ci --skip-targets-install
           fi
 
+      - name: Patch Android keyboard insets
+        run: python3 .github/scripts/patch-android-keyboard.py
+
       - name: Configure Android signing
         env:
           ANDROID_KEY_BASE64: ${{ secrets.ANDROID_KEY_BASE64 }}
