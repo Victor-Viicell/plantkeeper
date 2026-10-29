@@ -301,7 +301,10 @@ export function DeviceDetail({
         display: flex;
         flex-direction: column;
         gap: 0.75rem;
-        padding: 1rem max(1rem, env(safe-area-inset-right)) calc(1.5rem + env(safe-area-inset-bottom))
+        /* The last card holds text fields, so the scroll has to run past the
+           keyboard: without the inset the form cannot be scrolled into view. */
+        padding: 1rem max(1rem, env(safe-area-inset-right))
+          calc(1.5rem + env(safe-area-inset-bottom) + var(--keyboard-inset, 0px))
           max(1rem, env(safe-area-inset-left));
       }
 
@@ -665,7 +668,9 @@ export function DeviceDetail({
       /* Phones held sideways have very little height to spare. */
       @media (orientation: landscape) and (max-height: 32rem) {
         .detail-body {
-          padding-block: 0.75rem;
+          /* Tighter, but still clears the keyboard: sideways with the keys up
+             there is almost no room left for the form. */
+          padding-block: 0.75rem calc(0.75rem + var(--keyboard-inset, 0px));
         }
 
         .detail-plot {

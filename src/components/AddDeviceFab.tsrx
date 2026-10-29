@@ -228,6 +228,9 @@ export function AddDeviceFab({
       .sheet-layer {
         position: fixed;
         inset: 0;
+        /* Rides above the software keyboard: the sheet is anchored to the bottom
+           of this layer, so it must not sit behind the keys. */
+        bottom: var(--keyboard-inset, 0px);
         z-index: 30;
         display: flex;
         align-items: flex-end;

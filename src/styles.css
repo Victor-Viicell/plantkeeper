@@ -20,6 +20,12 @@
   /* The width every page column is capped at. */
   --app-max-width: 28rem;
 
+  /* Height the software keyboard covers on screen, written by
+     utils/keyboardInset.ts. Zero while it is closed, so any surface pinned to
+     the bottom can add it to its bottom padding or offset and ride above the
+     keys. */
+  --keyboard-inset: 0px;
+
   --app-backdrop: #e9eee9;
   --app-backdrop-accent: #e3f6e6;
   --app-surface: #f6f6f6;
