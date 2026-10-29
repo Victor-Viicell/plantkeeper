@@ -43,6 +43,12 @@ On the first run, generate the Android Studio project with
 builds also need the signing setup described in
 [Android releases](#android-releases-github-actions).
 
+`minSdk` is 26 (Android 8.0), not Tauri's default 24, because
+`tauri-plugin-blec` requires it. It lives in `src-tauri/tauri.conf.json` as
+`bundle.android.minSdkVersion`, so both the generated Gradle project and the
+Rust NDK linker use it. If `src-tauri/gen/android` was generated before this
+setting existed, delete it and re-run `bun run tauri android init`.
+
 Read [Backend setup](#backend-setup) and [Authentication](#authentication) for
 the dashboard steps behind the live flow — both have settings that are easy to
 miss.
